@@ -2,11 +2,11 @@ use litellm_auth::SecretValue;
 use litellm_host_python::from_py;
 use litellm_inference_ocr::{
     types::{LiteLLMOcrRequest, OcrDocumentInput},
-    wire::{OcrWireRequest, decode_document, decode_request_input, owned_option_names},
+    wire::{OcrWireRequest, decode_document, decode_request_input},
 };
 use litellm_llms::base_llm::ocr::error::Error;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyDict};
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 use super::{document::FileDocumentInput, errors::to_pyerr as ocr_error_to_pyerr};
 use crate::{
@@ -14,7 +14,7 @@ use crate::{
     marshal::request_input_sources,
     routes::{
         codec::connection_options,
-        parameters::{field, merged_request, provider_parameters},
+        parameters::{connection_fields, field, merged_request, provider_parameters},
     },
 };
 
@@ -75,9 +75,11 @@ pub(super) fn project_request(
         &field(&request, "document")?
             .ok_or_else(|| PyValueError::new_err("document is required"))?,
     )?;
-    let owned = owned_option_names(&options.model, options.custom_llm_provider.as_deref())
-        .map_err(ocr_error_to_pyerr)?;
-    let optional_params = provider_parameters(&request, "document", &owned)?;
+    let optional_params: Map<String, Value> =
+        provider_parameters(&request, "document", &["req_format", "max_response_bytes"])?
+            .into_iter()
+            .chain(connection_fields(&request)?)
+            .collect();
     let input_sources = request_input_sources(
         &request,
         optional_params
@@ -93,7 +95,7 @@ pub(super) fn project_request(
         api_base: options.api_base,
         custom_llm_provider: options.custom_llm_provider,
         extra_headers: options.extra_headers,
-        optional_params: optional_params.into(),
+        optional_params,
         input_sources,
         timeout_seconds: options.timeout.map(|timeout| timeout.as_secs_f64()),
     };

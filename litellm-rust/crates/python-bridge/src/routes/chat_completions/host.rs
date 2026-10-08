@@ -17,6 +17,7 @@ impl From<ProjectedCall> for ChatCompletionsCall {
             model: call.options.model,
             messages: call.input,
             optional_params: call.params,
+            connection: call.connection,
             api_key: call.options.api_key,
             api_base: call.options.api_base,
             custom_llm_provider: call.options.custom_llm_provider,

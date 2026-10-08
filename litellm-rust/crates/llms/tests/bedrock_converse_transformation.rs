@@ -1,4 +1,5 @@
 use litellm_auth::CredentialPlacement;
+use litellm_auth::{ConnectionArguments, InputSource};
 use litellm_llms::{
     Error,
     base_llm::{
@@ -20,6 +21,10 @@ fn params(value: Value) -> Map<String, Value> {
         Value::Object(map) => map,
         other => panic!("params must be an object, got {other}"),
     }
+}
+
+fn connection(value: Value) -> ConnectionArguments {
+    ConnectionArguments::from_arguments(&params(value), |_| InputSource::Deployment)
 }
 
 fn transform(msgs: Value, opts: Value) -> Value {
@@ -252,9 +257,12 @@ fn builds_the_converse_url_from_the_region_in_the_model_id() {
     let config = &BEDROCK_CHAT_COMPLETIONS_CONFIG;
     assert_eq!(
         config
-            .get_complete_url(None, "us-east-1/anthropic.claude-v2", &Map::new(), &|_| {
-                None
-            })
+            .get_complete_url(
+                None,
+                "us-east-1/anthropic.claude-v2",
+                &ConnectionArguments::default(),
+                &|_| { None }
+            )
             .expect("url builds"),
         "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude-v2/converse"
     );
@@ -266,13 +274,23 @@ fn falls_back_to_the_region_env_then_the_default_region() {
     let with_env = |key: &str| (key == "AWS_REGION_NAME").then(|| "eu-west-1".to_string());
     assert_eq!(
         config
-            .get_complete_url(None, "anthropic.claude-v2", &Map::new(), &with_env)
+            .get_complete_url(
+                None,
+                "anthropic.claude-v2",
+                &ConnectionArguments::default(),
+                &with_env
+            )
             .expect("url builds"),
         "https://bedrock-runtime.eu-west-1.amazonaws.com/model/anthropic.claude-v2/converse"
     );
     assert_eq!(
         config
-            .get_complete_url(None, "anthropic.claude-v2", &Map::new(), &|_| None)
+            .get_complete_url(
+                None,
+                "anthropic.claude-v2",
+                &ConnectionArguments::default(),
+                &|_| None
+            )
             .expect("url builds"),
         "https://bedrock-runtime.us-west-2.amazonaws.com/model/anthropic.claude-v2/converse"
     );
@@ -281,7 +299,7 @@ fn falls_back_to_the_region_env_then_the_default_region() {
 #[test]
 fn prefers_an_explicit_runtime_endpoint_over_the_api_base() {
     let config = &BEDROCK_CHAT_COMPLETIONS_CONFIG;
-    let overrides = params(json!({"aws_bedrock_runtime_endpoint": "https://vpce.internal/"}));
+    let overrides = connection(json!({"aws_bedrock_runtime_endpoint": "https://vpce.internal/"}));
     assert_eq!(
         config
             .get_complete_url(
@@ -318,7 +336,7 @@ fn signs_with_sigv4_in_the_resolved_region() {
             Vec::new(),
             None,
             "eu-central-1/anthropic.claude-v2",
-            &Map::new(),
+            &ConnectionArguments::default(),
             &|_| None,
         )
         .expect("auth resolves");
@@ -344,7 +362,7 @@ fn a_bearer_token_outranks_sigv4_the_way_python_resolves_it() {
                     Vec::new(),
                     api_key,
                     "eu-central-1/anthropic.claude-v2",
-                    &Map::new(),
+                    &ConnectionArguments::default(),
                     env,
                 )
                 .expect("auth resolves")
@@ -576,7 +594,13 @@ fn accepts_aws_call_configuration_without_serializing_it() {
         ),
         Ok(())
     );
-    let body = transform(json!([{"role": "user", "content": "hi"}]), call_config);
+    let (provider_params, connection) =
+        ConnectionArguments::split(params(call_config), |_| InputSource::Deployment);
+    let body = transform(
+        json!([{"role": "user", "content": "hi"}]),
+        Value::Object(provider_params),
+    );
+    assert!(connection.get("aws_bedrock_runtime_endpoint").is_some());
     assert_eq!(
         body,
         json!({
@@ -597,7 +621,7 @@ fn leaves_a_complete_converse_url_untouched() {
             .get_complete_url(
                 Some(already_built),
                 "anthropic.claude-v2",
-                &Map::new(),
+                &ConnectionArguments::default(),
                 &|_| None
             )
             .expect("url builds"),
@@ -610,7 +634,7 @@ fn leaves_a_complete_converse_url_untouched() {
 fn host_supplied_credentials_outrank_ambient_profile_and_role_state() {
     use litellm_auth_aws::host_supplied_credentials;
 
-    let supplied = params(json!({
+    let supplied = connection(json!({
         "aws_access_key_id": "AKIAHOST",
         "aws_secret_access_key": "hostsecret",
         "aws_session_token": "hosttoken"
@@ -622,12 +646,12 @@ fn host_supplied_credentials_outrank_ambient_profile_and_role_state() {
 
     // Without a full static pair there is nothing to honor, so the core falls
     // back to deriving credentials itself.
-    assert!(host_supplied_credentials(&params(json!({"aws_access_key_id": "AKIA"}))).is_none());
+    assert!(host_supplied_credentials(&connection(json!({"aws_access_key_id": "AKIA"}))).is_none());
     assert!(
-        host_supplied_credentials(&params(
+        host_supplied_credentials(&connection(
             json!({"aws_access_key_id": "  ", "aws_secret_access_key": "s"})
         ))
         .is_none()
     );
-    assert!(host_supplied_credentials(&Map::new()).is_none());
+    assert!(host_supplied_credentials(&ConnectionArguments::default()).is_none());
 }

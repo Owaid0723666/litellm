@@ -28,6 +28,7 @@ pub const STREAM_PARAM: &str = "stream";
 const IGNORABLE_MESSAGE_FIELDS: &[&str] = &["name"];
 
 pub use crate::base_llm::auth::{Headers, ValidatedEnvironment};
+pub use litellm_auth::ConnectionArguments;
 
 pub trait BaseConfig: Sync {
     fn secret_names(&self) -> Vec<&'static str>;
@@ -36,7 +37,7 @@ pub trait BaseConfig: Sync {
         &self,
         api_base: Option<&str>,
         model: &str,
-        optional_params: &Map<String, Value>,
+        connection: &ConnectionArguments,
         env_lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<String, Error>;
 
@@ -65,7 +66,7 @@ pub trait BaseConfig: Sync {
         headers: Headers,
         api_key: Option<&str>,
         model: &str,
-        optional_params: &Map<String, Value>,
+        connection: &ConnectionArguments,
         env_lookup: &dyn Fn(&str) -> Option<String>,
     ) -> Result<ValidatedEnvironment, Error>;
 
